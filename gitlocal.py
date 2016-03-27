@@ -7,8 +7,7 @@ import traceback
 import subprocess
 
 def main(argv):
-    try: root = subprocess.check_output('git config --get local.storage')
-    except Exception: root = '/gitroot'
+    root = getconfig(True) or '/gitroot'
     p = argparse.ArgumentParser(prog=argv[0], description='git local')
     p.add_argument('--gitroot', default=root, help='Path to git local storage.')
     cmds = p.add_subparsers(title='subcommands', description='known subcommands', help='sub-command help')
@@ -20,8 +19,8 @@ def main(argv):
     cmdinit.set_defaults(func=doinit)
     cmdhelp = cmds.add_parser('help', help='git local help subcommand')
     cmdhelp.set_defaults(func=dohelp)
-    cmdtest = cmds.add_parser('test', help='git local test subcommand')
-    cmdtest.set_defaults(func=dotest)
+    #cmdtest = cmds.add_parser('test', help='git local test subcommand')
+    #cmdtest.set_defaults(func=dotest)
     p.set_defaults(parser=p)
     args = p.parse_args(argv[1:])
     return args.func(args)
@@ -35,14 +34,15 @@ def dohelp(args):
     return 0
 
 def dotest(args):
-    print '\n'.join('%s=%s' % item for item in os.environ.items())
+    print '\n'.join('%s=%s' % item for item in sorted(os.environ.items()))
 
 def doinit(args):
     if 'GIT_WORK_TREE' in os.environ:
         gitpath = os.environ['GIT_WORK_TREE']
     else:
-        subprocess.check_call('git init'.split())
         gitpath = os.getcwd()
+        if not os.path.exists(os.path.join(gitpath, '.git', 'config')):
+            subprocess.check_call('git init'.split())
     ensureconfig(args.gitroot)
     gitname = os.path.basename(gitpath)
     if os.path.splitext(gitname)[1] != '.git': gitname += '.git'
@@ -52,10 +52,13 @@ def doinit(args):
     except Exception:
         #traceback.print_exc()
         remote = None
-    if remote is not None:
-        if remote == gitremote: return 0
+    if remote is not None and remote != gitremote:
         print doinit_remote_errorpage % dict(remote=args.remote, url=remote)
-    subprocess.check_call('git remote add'.split()+[args.remote, gitremote])
+        return 1
+    if not os.path.exists(os.path.join(gitremote, 'config')):
+        subprocess.check_call('git init --bare'.split()+[gitremote])
+    if remote is None:
+        subprocess.check_call('git remote add'.split()+[args.remote, gitremote])
 
 doinit_remote_errorpage = '''
 ERROR: the remote "%(remote)s" already exists.
@@ -83,18 +86,30 @@ you can push to multiple git remotes:
 Please do one of the above and try again.
 '''
 
-def sameconfig(gitroot):
-    root = subprocess.check_output('git config --get local.storage'.split())
-    return root.rstrip('\n\r') == gitroot
+def getconfig(skiperr=False):
+    stderr = None
+    if skiperr: stderr = open(os.devnull,'w')
+    try: root = subprocess.check_output('git config --get local.storage'.split())
+    except Exception:
+        if not skiperr: raise
+        root = ''
+    return root.rstrip('\n\r')
 
-def setconfig(gitroot, target='--local'):
-    subprocess.check_call(('git config '+target+' --replace-all local.storage').split()+[gitroot])
+def sameconfig(gitroot, skiperr=False):
+    return getconfig(skiperr) == gitroot
+
+def setconfig(gitroot, target='--local', skiperr=False):
+    stderr = None
+    if skiperr: stderr = open(os.devnull,'w')
+    try: subprocess.check_call(('git config '+target+' --replace-all local.storage').split()+[gitroot], stderr=stderr)
+    except Exception:
+        if not skiperr: raise
 
 def ensureconfig(gitroot):
     try:
         if sameconfig(gitroot): return
     except Exception: pass
-    setconfig(args.gitroot)
+    setconfig(gitroot)
 
 def doconfig(args):
     # FIXME: How to get path to my alias (ln <git cloned gitlocal.py> to /usr/local/bin/gitlocal or alike)
@@ -102,10 +117,8 @@ def doconfig(args):
     try:
         if sameconfig(args.gitroot): return 0
     except Exception:
-        try:
-            setconfig(args.gitroot, '--system')
-            if sameconfig(args.gitroot): return 0
-        except Exception: pass
+        setconfig(args.gitroot, '--system', True)
+        if sameconfig(args.gitroot, True): return 0
         setconfig(args.gitroot, '--global')
         try:
             if sameconfig(args.gitroot): return 0

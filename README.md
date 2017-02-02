@@ -1,3 +1,5 @@
+Outdated in favor of [git-repo](https://github.com/guyzmo/git-repo).
+
 # gitlocal
 Support git local subcommand. Currently only in preliminary status - it works only on author computer due to absence of any documentation.
 If you can and want to provide documentation PR will be accepted gratefully.
